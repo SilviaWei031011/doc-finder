@@ -1,0 +1,7 @@
+[browser]
+# Do not send anonymous usage statistics to Streamlit.
+gatherUsageStats = false
+
+[server]
+# Max upload size in MB for st.file_uploader.
+maxUploadSize = 200

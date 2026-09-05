@@ -1,0 +1,9 @@
+# doc_finder runtime dependencies. Python >= 3.9 (developed with 3.9.6 on macOS arm64).
+# Install:  python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+streamlit==1.50.0
+pymupdf==1.26.5
+faiss-cpu==1.13.0
+sentence-transformers==5.1.2
+transformers==4.57.3
+torch==2.8.0
+numpy==2.0.2
