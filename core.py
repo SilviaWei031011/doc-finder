@@ -51,6 +51,14 @@ class NoTextError(ValueError):
     """The PDF contains no extractable text (scanned / image-only PDF)."""
 
 
+class PDFLimitError(ValueError):
+    """A PDF exceeds a configured public-demo limit."""
+
+
+class InvalidPDFError(ValueError):
+    """An upload is not an unlocked PDF."""
+
+
 class RegistryError(RuntimeError):
     """collections.json exists but cannot be read."""
 
@@ -125,12 +133,22 @@ def extract_pages(pdf_path: str) -> List[str]:
         return [page.get_text() for page in doc]
 
 
-def chunk_pdf(pdf_path: str):
+def chunk_pdf(pdf_path: str, max_pages: Optional[int] = None,
+              max_chunks: Optional[int] = None):
     """Return (chunks, num_pages); each chunk is {"page": 1-based page number, "text": str}."""
-    pages = extract_pages(pdf_path)
-    chunks = [{"page": i + 1, "text": ch}
-              for i, text in enumerate(pages) for ch in split_text_to_chunks(text)]
-    return chunks, len(pages)
+    chunks = []
+    with fitz.open(pdf_path) as doc:
+        if not doc.is_pdf or doc.needs_pass:
+            raise InvalidPDFError("请上传有效且未加密的 PDF 文件。")
+        num_pages = len(doc)
+        if max_pages is not None and num_pages > max_pages:
+            raise PDFLimitError(f"公开演示每份 PDF 最多 {max_pages} 页。")
+        for i, page in enumerate(doc):
+            for text in split_text_to_chunks(page.get_text()):
+                if max_chunks is not None and len(chunks) >= max_chunks:
+                    raise PDFLimitError(f"公开演示每份 PDF 最多 {max_chunks} 个文本片段，请缩短文档。")
+                chunks.append({"page": i + 1, "text": text})
+    return chunks, num_pages
 
 
 # ----------------------------------------------------------------------------- index build / load
@@ -155,11 +173,13 @@ def corpus_mtime(folder: str) -> float:
 
 
 def build_corpus(pdf_path: str, out_dir: str, model: SentenceTransformer,
-                 progress_cb: Optional[ProgressCallback] = None) -> BuildResult:
+                 progress_cb: Optional[ProgressCallback] = None, *,
+                 max_pages: Optional[int] = None,
+                 max_chunks: Optional[int] = None) -> BuildResult:
     """Extract, chunk, embed and index one PDF; writes index.faiss + meta.json into out_dir.
     Files are written to temporary names first, so a failure never leaves a half-written index."""
     t0 = time.time()
-    chunks, num_pages = chunk_pdf(pdf_path)
+    chunks, num_pages = chunk_pdf(pdf_path, max_pages=max_pages, max_chunks=max_chunks)
     if not chunks:
         raise NoTextError("PDF 中没有可提取的文本（可能是扫描件或纯图片 PDF）")
     vectors = embed(model, [c["text"] for c in chunks], progress_cb=progress_cb)
@@ -259,7 +279,8 @@ def search(corpus: Corpus, model: SentenceTransformer, query: str, top_k: int) -
 
 # ----------------------------------------------------------------------------- highlight
 
-def render_highlight(pdf_path: str, page_number: int, text: str, dpi: int = 110) -> bytes:
+def render_highlight(pdf_path: str, page_number: int, text: str, dpi: int = 110,
+                     max_side: Optional[int] = None) -> bytes:
     """Return a PNG of `page_number` (1-based) with `text` highlighted. The PDF is not modified."""
     with fitz.open(pdf_path) as doc:
         if not 1 <= page_number <= len(doc):
@@ -272,6 +293,9 @@ def render_highlight(pdf_path: str, page_number: int, text: str, dpi: int = 110)
             rects = page.search_for(short)
         for r in rects:
             page.add_highlight_annot(r)
+        if max_side is not None:
+            scale = min(dpi / 72, max_side / max(page.rect.width, page.rect.height))
+            return page.get_pixmap(matrix=fitz.Matrix(scale, scale)).tobytes("png")
         return page.get_pixmap(dpi=dpi).tobytes("png")
 
 

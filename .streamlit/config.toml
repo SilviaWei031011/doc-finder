@@ -4,4 +4,8 @@ gatherUsageStats = false
 
 [server]
 # Max upload size in MB for st.file_uploader.
-maxUploadSize = 200
+maxUploadSize = 25
+
+[client]
+# Public errors should never include server paths or document details.
+showErrorDetails = "none"

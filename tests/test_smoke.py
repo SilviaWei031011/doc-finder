@@ -5,6 +5,7 @@ Without DOC_FINDER_MODEL the default BAAI/bge-m3 is downloaded from the Hugging 
 The test PDF is generated on the fly from original sentences written for this test.
 """
 import os
+import shutil
 import sys
 import time
 
@@ -165,14 +166,26 @@ def test_registry_rejects_bad_ids(tmp_path):
 
 # ----------------------------------------------------------------------------- Streamlit UI (AppTest)
 
-def test_streamlit_ui_select_search_highlight(corpus_env, monkeypatch):
+def test_streamlit_ui_select_search_highlight(corpus_env, model, monkeypatch, tmp_path):
+    import streamlit as st
+    import session_storage
     from streamlit.testing.v1 import AppTest
 
+    store = session_storage.SessionStore(tmp_path / "sessions")
+    monkeypatch.setattr(session_storage, "SessionStore", lambda: store)
+    # Reuse the actual BGE-M3 fixture, not a second multi-GB model in the UI cache.
+    monkeypatch.setattr(core, "load_model", lambda *args, **kwargs: model)
+    st.cache_resource.clear()
+    # The legacy local corpus directory must not become visible in the web app.
     monkeypatch.setenv("DOC_FINDER_CORPUS_DIR", corpus_env["base"])
     at = AppTest.from_file(os.path.join(ROOT, "app.py"), default_timeout=600)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("请在左侧选择" in i.value for i in at.info)
+    assert not at.expander
+    with store.session(at.session_state["session_token"]) as a:
+        shutil.copytree(corpus_env["base"], a.path, dirs_exist_ok=True)
+    at.run()
 
     at.button(key=f"choose_{corpus_env['id']}").click().run()
     assert not at.exception, [e.value for e in at.exception]
@@ -196,6 +209,45 @@ def test_streamlit_ui_select_search_highlight(corpus_env, monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     md = "\n".join(m.value for m in at.markdown)
     assert "候选 1" in md and len(at.get("imgs")) == 1
+
+    # Independent browser session cannot list or select the first one's corpus,
+    # even when a stale/forged selection ID is supplied.
+    other = AppTest.from_file(os.path.join(ROOT, "app.py"), default_timeout=600).run()
+    assert not other.exception
+    assert other.session_state["session_token"] != at.session_state["session_token"]
+    other.session_state["selected_corpus_id"] = corpus_env["id"]
+    other.run()
+    assert not other.expander and not other.text_area
+    assert other.session_state["selected_corpus_id"] is None
+    with store.session(other.session_state["session_token"]) as b:
+        shutil.copytree(corpus_env["base"], b.path, dirs_exist_ok=True)
+    other.run()
+
+    # Clear resets PDF uploader generation and all result/query/highlight state;
+    # another session's files and the old CLI corpus survive.
+    old_generation = at.session_state["upload_generation"]
+    at.button(key="clear_documents").click().run()
+    assert not at.exception
+    assert not os.path.exists(a.path)
+    assert os.path.isfile(os.path.join(b.path, core.COLLECTIONS_FILENAME))
+    assert os.path.isfile(corpus_env["pdf"])
+    assert at.session_state["results"] is None and not at.get("imgs")
+    assert at.session_state["upload_generation"] > old_generation
+    assert not at.expander and not at.text_area
+
+    # Re-entering an expired session discards all stale selections and results.
+    other.button(key=f"choose_{corpus_env['id']}").click().run()
+    other.session_state["results"] = {"corpus_id": corpus_env["id"], "hits": []}
+    store.cleanup(now=time.time() + store.ttl_seconds + 1)
+    other.run()
+    assert not other.exception and not other.expander
+    assert other.session_state["results"] is None
+    assert any("已过期" in msg.value for msg in other.info)
+    visible = "\n".join(str(getattr(el, "value", "")) for el in other)
+    assert other.session_state["session_token"] not in visible
+    assert str(store.root) not in visible
+    store.close()
+    st.cache_resource.clear()
 
 
 if __name__ == "__main__":

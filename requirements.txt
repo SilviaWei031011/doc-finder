@@ -1,9 +1,12 @@
 # doc_finder runtime dependencies. Python >= 3.9 (developed with 3.9.6 on macOS arm64).
 # Install:  python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+# Only torch wheels come from this source; all other packages use the normal index.
+--find-links https://download.pytorch.org/whl/cpu/torch/
 streamlit==1.50.0
 pymupdf==1.26.5
 faiss-cpu==1.13.0
 sentence-transformers==5.1.2
 transformers==4.57.3
-torch==2.8.0
+torch==2.8.0+cpu ; sys_platform == "linux"
+torch==2.8.0 ; sys_platform != "linux"
 numpy==2.0.2
