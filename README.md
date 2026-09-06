@@ -2,6 +2,8 @@
 
 **Find the English source passage—and its PDF page—behind a Chinese translation, paraphrase, or reading note.**
 
+**在线使用 / Live app：[打开 Doc Finder](https://doc-finder.streamlit.app/)**
+
 `v0.1` · early-stage research utility · local or hosted Streamlit interface · no external inference API
 
 Doc Finder is a small research utility for people who read English sources and take notes or write in Chinese. Upload an English PDF, paste a Chinese translation, paraphrase, or reading note based on the document, and Doc Finder retrieves the most semantically similar passages from the original English text together with their PDF page numbers. It can also render the corresponding PDF page with the matched passage highlighted.
